@@ -1,3 +1,7 @@
+[![Test HDF5 develop branch](https://github.com/hyoklee/ADIOS2/actions/workflows/hdf5.yml/badge.svg)](https://github.com/hyoklee/ADIOS2/actions/workflows/hdf5.yml)
+
+[![Test HDF5 1.12.1 branch](https://github.com/hyoklee/ADIOS2/actions/workflows/hdf5_1_12_1.yml/badge.svg)](https://github.com/hyoklee/ADIOS2/actions/workflows/hdf5_1_12_1.yml)
+
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Documentation](https://readthedocs.org/projects/adios2/badge/?version=latest)](https://adios2.readthedocs.io/en/latest/?badge=latest)
 
@@ -37,7 +41,7 @@ In addition, ADIOS2 APIs are based on:
 * **Data Groups** ADIOS2 favors a deferred/prefetch/grouped variables transport mode by default to maximize data-per-request ratios.
 Sync mode, one variable at a time, is treated as the special case.
 
-* **Data Steps** ADIOS2 follows the actual production/consumption of data using an I/O “steps” abstraction removing the need to manage extra indexing information.
+* **Data Steps** ADIOS2 follows the actual production/consumption of data using an I/O �쐓teps” abstraction removing the need to manage extra indexing information.
 
 * **Data Engines** ADIOS2 Engine abstraction allows for reusing the APIs for different transport modes removing the need for drastic code changes.
 
