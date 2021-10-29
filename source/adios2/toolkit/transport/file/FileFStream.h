@@ -57,6 +57,10 @@ public:
 
     void SeekToBegin() final;
 
+    void Seek(const size_t start = MaxSizeT) final;
+
+    void MkDir(const std::string &fileName) final;
+
 private:
     /** file stream using fstream library */
     std::fstream m_FileStream;

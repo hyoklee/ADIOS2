@@ -32,6 +32,14 @@
 namespace adios2
 {
 
+/** Memory space for the buffers received with Put */
+enum class MemorySpace
+{
+    Detect, ///< Detect the memory space automatically
+    Host,   ///< Host memory space (default)
+    CUDA    ///< GPU memory spaces
+};
+
 /** Variable shape type identifier, assigned automatically from the signature of
  *  DefineVariable */
 enum class ShapeID
@@ -41,7 +49,7 @@ enum class ShapeID
     GlobalArray, ///< global (across MPI_Comm) array, common case
     JoinedArray, ///< global array with a common (joinable) dimension
     LocalValue,  ///< special case, local independent value
-    LocalArray   ///< special case, local independent array
+    LocalArray,  ///< special case, local independent array
 };
 
 /** Used to set IO class */
@@ -59,6 +67,7 @@ enum class Mode
     Write,
     Read,
     Append,
+    ReadRandomAccess, // reader random access mode
     // launch execution modes
     Sync,
     Deferred
@@ -88,7 +97,7 @@ enum class StepMode
 {
     Append,
     Update, // writer advance mode
-    Read    // reader advance mode
+    Read,   // reader advance mode
 };
 
 enum class StepStatus
@@ -296,8 +305,16 @@ namespace zfp
 namespace key
 {
 constexpr char accuracy[] = "accuracy";
+constexpr char backend[] = "backend";
 constexpr char rate[] = "rate";
 constexpr char precision[] = "precision";
+}
+
+namespace value
+{
+constexpr char backend_cuda[] = "cuda";
+constexpr char backend_omp[] = "omp";
+constexpr char backend_serial[] = "serial";
 }
 }
 #endif

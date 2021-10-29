@@ -17,10 +17,9 @@ namespace adios2
 {
 namespace format
 {
-// DEFAULTS only saves input and output payload sizes in metadata
-// PROTECTED
+
 template <class T>
-void BPOperation::SetDataDefault(
+void BPOperation::SetData(
     const core::Variable<T> &variable,
     const typename core::Variable<T>::BPInfo &blockInfo,
     const typename core::Variable<T>::Operation &operation,
@@ -31,10 +30,10 @@ void BPOperation::SetDataDefault(
     // being naughty here
     Params &info = const_cast<Params &>(operation.Info);
 
-    const size_t outputSize = op.Compress(
-        blockInfo.Data, blockInfo.Count, variable.m_ElementSize,
-        variable.m_Type, bufferSTL.m_Buffer.data() + bufferSTL.m_Position,
-        parameters, info);
+    const size_t outputSize = op.Operate(
+        reinterpret_cast<char *>(blockInfo.Data), blockInfo.Start,
+        blockInfo.Count, variable.m_Type,
+        bufferSTL.m_Buffer.data() + bufferSTL.m_Position, parameters);
 
     info["OutputSize"] = std::to_string(outputSize);
 
@@ -43,7 +42,7 @@ void BPOperation::SetDataDefault(
 }
 
 template <class T>
-void BPOperation::SetMetadataDefault(
+void BPOperation::SetMetadata(
     const core::Variable<T> &variable,
     const typename core::Variable<T>::BPInfo &blockInfo,
     const typename core::Variable<T>::Operation &operation,
@@ -65,7 +64,7 @@ void BPOperation::SetMetadataDefault(
 }
 
 template <class T>
-void BPOperation::UpdateMetadataDefault(
+void BPOperation::UpdateMetadata(
     const core::Variable<T> &variable,
     const typename core::Variable<T>::BPInfo &blockInfo,
     const typename core::Variable<T>::Operation &operation,

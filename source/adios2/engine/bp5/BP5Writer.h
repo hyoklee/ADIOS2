@@ -10,6 +10,7 @@
 #define ADIOS2_ENGINE_BP5_BP5WRITER_H_
 
 #include "adios2/common/ADIOSConfig.h"
+#include "adios2/core/CoreTypes.h"
 #include "adios2/core/Engine.h"
 #include "adios2/engine/bp5/BP5Engine.h"
 #include "adios2/helper/adiosComm.h"
@@ -65,7 +66,7 @@ private:
 
     transportman::TransportMan m_FileMetaMetadataManager;
 
-    int64_t m_WriterStep = -1;
+    int64_t m_WriterStep = 0;
     /*
      *  Burst buffer variables
      */
@@ -93,6 +94,8 @@ private:
     std::vector<std::string> m_DrainMetadataIndexFileNames;
     std::vector<std::string> m_ActiveFlagFileNames;
 
+    bool m_BetweenStepPairs = false;
+
     void Init() final;
 
     /** Parses parameters from IO SetParameters */
@@ -103,6 +106,7 @@ private:
     void InitTransports() final;
     /** Allocates memory and starts a PG group */
     void InitBPBuffer();
+    void NotifyEngineAttribute(std::string name, DataType type) noexcept;
 
 #define declare_type(T)                                                        \
     void DoPut(Variable<T> &variable, typename Variable<T>::Span &span,        \
@@ -145,9 +149,8 @@ private:
 
     void WriteMetadataFileIndex(uint64_t MetaDataPos, uint64_t MetaDataSize);
 
-    uint64_t
-    WriteMetadata(const std::vector<format::BufferV::iovec> MetaDataBlocks,
-                  const std::vector<format::BufferV::iovec> AttributeBlocks);
+    uint64_t WriteMetadata(const std::vector<core::iovec> &MetaDataBlocks,
+                           const std::vector<core::iovec> &AttributeBlocks);
 
     /** Write Data to disk, in an aggregator chain */
     void WriteData(format::BufferV *Data);
@@ -168,9 +171,8 @@ private:
     void MarshalAttributes();
 
     /* Two-level-shm aggregator functions */
-    void WriteMyOwnData(format::BufferV::BufferV_iovec DataVec);
-    void SendDataToAggregator(format::BufferV::BufferV_iovec DataVec,
-                              const size_t TotalSize);
+    void WriteMyOwnData(format::BufferV *Data);
+    void SendDataToAggregator(format::BufferV *Data);
     void WriteOthersData(const size_t TotalSize);
 
     template <class T>

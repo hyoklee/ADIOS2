@@ -9,6 +9,7 @@
  */
 
 #include "MhsReader.tcc"
+#include "adios2/helper/adiosFunctions.h"
 
 namespace adios2
 {
@@ -22,11 +23,12 @@ MhsReader::MhsReader(IO &io, const std::string &name, const Mode mode,
 : Engine("MhsReader", io, name, mode, std::move(comm))
 {
     helper::GetParameter(io.m_Parameters, "Tiers", m_Tiers);
-    Params params = {{"tiers", std::to_string(m_Tiers)}};
-    m_Compressor = std::make_shared<compress::CompressSirius>(params);
+    Params params = {{"Tiers", std::to_string(m_Tiers)}};
+    m_SiriusCompressor = std::make_shared<compress::CompressSirius>(params);
     io.SetEngine("");
     m_SubIOs.emplace_back(&io);
     m_SubEngines.emplace_back(&io.Open(m_Name + ".tier0", adios2::Mode::Read));
+
     for (int i = 1; i < m_Tiers; ++i)
     {
         m_SubIOs.emplace_back(

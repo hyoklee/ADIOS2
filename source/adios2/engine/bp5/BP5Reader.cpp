@@ -11,7 +11,6 @@
 
 #include <adios2-perfstubs-interface.h>
 
-#include <chrono>
 #include <errno.h>
 
 namespace adios2
@@ -37,9 +36,55 @@ BP5Reader::~BP5Reader()
         delete m_BP5Deserializer;
 }
 
+void BP5Reader::InstallMetadataForTimestep(size_t Step)
+{
+    size_t pgstart = m_MetadataIndexTable[Step][0];
+    size_t Position = pgstart + sizeof(uint64_t); // skip total data size
+    size_t MDPosition = Position + 2 * sizeof(uint64_t) * m_WriterCount;
+    for (size_t WriterRank = 0; WriterRank < m_WriterCount; WriterRank++)
+    {
+        // variable metadata for timestep
+        size_t ThisMDSize = helper::ReadValue<uint64_t>(
+            m_Metadata.m_Buffer, Position, m_Minifooter.IsLittleEndian);
+        char *ThisMD = m_Metadata.m_Buffer.data() + MDPosition;
+        if (m_OpenMode == Mode::ReadRandomAccess)
+        {
+            m_BP5Deserializer->InstallMetaData(ThisMD, ThisMDSize, WriterRank,
+                                               Step);
+        }
+        else
+        {
+            m_BP5Deserializer->InstallMetaData(ThisMD, ThisMDSize, WriterRank);
+        }
+        MDPosition += ThisMDSize;
+    }
+    for (size_t WriterRank = 0; WriterRank < m_WriterCount; WriterRank++)
+    {
+        // attribute metadata for timestep
+        size_t ThisADSize = helper::ReadValue<uint64_t>(
+            m_Metadata.m_Buffer, Position, m_Minifooter.IsLittleEndian);
+        char *ThisAD = m_Metadata.m_Buffer.data() + MDPosition;
+        if (ThisADSize > 0)
+            m_BP5Deserializer->InstallAttributeData(ThisAD, ThisADSize);
+        MDPosition += ThisADSize;
+    }
+}
+
 StepStatus BP5Reader::BeginStep(StepMode mode, const float timeoutSeconds)
 {
     PERFSTUBS_SCOPED_TIMER("BP5Reader::BeginStep");
+
+    if (m_OpenMode == Mode::ReadRandomAccess)
+    {
+        throw std::logic_error(
+            "ERROR: BeginStep called in random access mode\n");
+    }
+    if (m_BetweenStepPairs)
+    {
+        throw std::logic_error("ERROR: BeginStep() is called a second time "
+                               "without an intervening EndStep()");
+    }
+
     if (mode != StepMode::Read)
     {
         throw std::invalid_argument("ERROR: mode is not supported yet, "
@@ -48,7 +93,6 @@ StepStatus BP5Reader::BeginStep(StepMode mode, const float timeoutSeconds)
                                     "BeginStep\n");
     }
 
-    m_IO.m_ReadStreaming = false; // can't do those checks
     StepStatus status = StepStatus::OK;
     if (m_FirstStep)
     {
@@ -67,6 +111,7 @@ StepStatus BP5Reader::BeginStep(StepMode mode, const float timeoutSeconds)
     }
     if (status == StepStatus::OK)
     {
+        m_BetweenStepPairs = true;
         if (m_FirstStep)
         {
             m_FirstStep = false;
@@ -89,31 +134,9 @@ StepStatus BP5Reader::BeginStep(StepMode mode, const float timeoutSeconds)
         //            i++;
         //        }
 
-        m_IO.RemoveAllVariables();
         m_BP5Deserializer->SetupForTimestep(m_CurrentStep);
 
-        size_t pgstart = m_MetadataIndexTable[m_CurrentStep][0];
-        size_t Position = pgstart + sizeof(uint64_t); // skip total data size
-        size_t MDPosition = Position + 2 * sizeof(uint64_t) * m_WriterCount;
-        for (size_t i = 0; i < m_WriterCount; i++)
-        {
-            // variable metadata for timestep
-            size_t ThisMDSize = helper::ReadValue<uint64_t>(
-                m_Metadata.m_Buffer, Position, m_Minifooter.IsLittleEndian);
-            char *ThisMD = m_Metadata.m_Buffer.data() + MDPosition;
-            m_BP5Deserializer->InstallMetaData(ThisMD, ThisMDSize, i);
-            MDPosition += ThisMDSize;
-        }
-        for (size_t i = 0; i < m_WriterCount; i++)
-        {
-            // attribute metadata for timestep
-            size_t ThisADSize = helper::ReadValue<uint64_t>(
-                m_Metadata.m_Buffer, Position, m_Minifooter.IsLittleEndian);
-            char *ThisAD = m_Metadata.m_Buffer.data() + MDPosition;
-            if (ThisADSize > 0)
-                m_BP5Deserializer->InstallAttributeData(ThisAD, ThisADSize);
-            MDPosition += ThisADSize;
-        }
+        InstallMetadataForTimestep(m_CurrentStep);
         m_IO.ResetVariablesStepSelection(false,
                                          "in call to BP5 Reader BeginStep");
 
@@ -130,6 +153,16 @@ size_t BP5Reader::CurrentStep() const { return m_CurrentStep; }
 
 void BP5Reader::EndStep()
 {
+    if (m_OpenMode == Mode::ReadRandomAccess)
+    {
+        throw std::logic_error("ERROR: EndStep called in random access mode\n");
+    }
+    if (!m_BetweenStepPairs)
+    {
+        throw std::logic_error(
+            "ERROR: EndStep() is called without a successful BeginStep()");
+    }
+    m_BetweenStepPairs = false;
     PERFSTUBS_SCOPED_TIMER("BP5Reader::EndStep");
     PerformGets();
 }
@@ -200,11 +233,12 @@ void BP5Reader::PerformGets()
 // PRIVATE
 void BP5Reader::Init()
 {
-    if (m_OpenMode != Mode::Read)
+    if ((m_OpenMode != Mode::Read) && (m_OpenMode != Mode::ReadRandomAccess))
     {
-        throw std::invalid_argument("ERROR: BPFileReader only "
-                                    "supports OpenMode::Read from" +
-                                    m_Name + " " + m_EndMessage);
+        throw std::invalid_argument(
+            "ERROR: BPFileReader only "
+            "supports OpenMode::Read or OpenMode::ReadRandomAccess from" +
+            m_Name + " " + m_EndMessage);
     }
 
     // if IO was involved in reading before this flag may be true now
@@ -224,8 +258,7 @@ void BP5Reader::Init()
         pollSeconds = timeoutSeconds;
     }
 
-    TimePoint timeoutInstant =
-        std::chrono::steady_clock::now() + timeoutSeconds;
+    TimePoint timeoutInstant = Now() + timeoutSeconds;
 
     OpenFiles(timeoutInstant, pollSeconds, timeoutSeconds);
 
@@ -236,7 +269,7 @@ void BP5Reader::Init()
 bool BP5Reader::SleepOrQuit(const TimePoint &timeoutInstant,
                             const Seconds &pollSeconds)
 {
-    auto now = std::chrono::steady_clock::now();
+    auto now = Now();
     if (now + pollSeconds >= timeoutInstant)
     {
         return false;
@@ -394,6 +427,12 @@ Engine::MinVarInfo *BP5Reader::MinBlocksInfo(const VariableBase &Var,
     return m_BP5Deserializer->MinBlocksInfo(Var, Step);
 }
 
+bool BP5Reader::VariableMinMax(const VariableBase &Var, const size_t Step,
+                               Engine::MinMaxStruct &MinMax)
+{
+    return m_BP5Deserializer->VariableMinMax(Var, Step, MinMax);
+}
+
 void BP5Reader::InitTransports()
 {
     if (m_IO.m_TransportsParameters.empty())
@@ -533,13 +572,21 @@ void BP5Reader::InitBuffer(const TimePoint &timeoutInstant,
         // done
 
         m_BP5Deserializer = new format::BP5Deserializer(
-            m_WriterCount, m_WriterIsRowMajor, m_ReaderIsRowMajor);
+            m_WriterCount, m_WriterIsRowMajor, m_ReaderIsRowMajor,
+            (m_OpenMode == Mode::ReadRandomAccess));
         m_BP5Deserializer->m_Engine = this;
 
         InstallMetaMetaData(m_MetaMetadata);
 
         m_IdxHeaderParsed = true;
 
+        if (m_OpenMode == Mode::ReadRandomAccess)
+        {
+            for (size_t Step = 0; Step < m_MetadataIndexTable.size(); Step++)
+            {
+                InstallMetadataForTimestep(Step);
+            }
+        }
         // fills IO with Variables and Attributes
         //        m_MDFileProcessedSize = ParseMetadata(
         //            m_Metadata, *this, true);

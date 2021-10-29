@@ -12,6 +12,7 @@
 #define ADIOS2_OPERATOR_COMPRESS_COMPRESSSIRIUS_H_
 
 #include "adios2/core/Operator.h"
+#include <unordered_map>
 
 namespace adios2
 {
@@ -28,22 +29,40 @@ public:
 
     ~CompressSirius() = default;
 
-    size_t Compress(const void *dataIn, const Dims &dimensions,
-                    const size_t elementSize, DataType type, void *bufferOut,
-                    const Params &params, Params &info) final;
+    size_t Operate(const char *dataIn, const Dims &blockStart,
+                   const Dims &blockCount, const DataType type, char *bufferOut,
+                   const Params &params) final;
 
-    using Operator::Decompress;
-
-    size_t Decompress(const void *bufferIn, const size_t sizeIn, void *dataOut,
-                      const Dims &dimensions, DataType type,
-                      const Params &parameters) final;
+    size_t InverseOperate(const char *bufferIn, const size_t sizeIn,
+                          char *dataOut) final;
 
     bool IsDataTypeValid(const DataType type) const final;
 
+    static bool m_CurrentReadFinished;
+
 private:
+    static int m_Tiers;
+
+    // for compress
     static std::vector<std::vector<char>> m_TierBuffers;
     static int m_CurrentTier;
-    static int m_Tiers;
+
+    // for decompress
+    static std::vector<std::unordered_map<std::string, std::vector<char>>>
+        m_TierBuffersMap;
+    static std::unordered_map<std::string, int> m_CurrentTierMap;
+
+    /**
+     * Decompress function for V1 buffer. Do NOT remove even if the buffer
+     * version is updated. Data might be still in lagacy formats. This function
+     * must be kept for backward compatibility
+     * @param bufferIn : compressed data buffer (V1 only)
+     * @param sizeIn : number of bytes in bufferIn
+     * @param dataOut : decompressed data buffer
+     * @return : number of bytes in dataOut
+     */
+    size_t DecompressV1(const char *bufferIn, const size_t sizeIn,
+                        char *dataOut);
 };
 
 } // end namespace compress

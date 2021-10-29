@@ -27,6 +27,23 @@ void Transport::IWrite(const char *buffer, size_t size, Status &status,
     throw std::invalid_argument("ERROR: this class doesn't implement IWrite\n");
 }
 
+void Transport::WriteV(const core::iovec *iov, const int iovcnt, size_t start)
+{
+    if (iovcnt > 0)
+    {
+        Write(static_cast<const char *>(iov[0].iov_base), iov[0].iov_len,
+              start);
+        for (int c = 1; c < iovcnt; ++c)
+        {
+            Write(static_cast<const char *>(iov[c].iov_base), iov[c].iov_len);
+        }
+    }
+    else if (start != MaxSizeT)
+    {
+        Seek(start);
+    }
+}
+
 void Transport::IRead(char *buffer, size_t size, Status &status, size_t start)
 {
     throw std::invalid_argument("ERROR: this class doesn't implement IRead\n");
@@ -121,18 +138,6 @@ void Transport::CheckName() const
         throw std::invalid_argument("ERROR: name can't be empty for " +
                                     m_Library + " transport \n");
     }
-}
-
-void Transport::MkDir(const std::string &fileName)
-{
-    const auto lastPathSeparator(fileName.find_last_of(PathSeparator));
-    if (lastPathSeparator == std::string::npos)
-    {
-        return;
-    }
-
-    const std::string path(fileName.substr(0, lastPathSeparator));
-    helper::CreateDirectory(path);
 }
 
 } // end namespace adios2

@@ -45,7 +45,13 @@ BP5Writer::BP5Writer(IO &io, const std::string &name, const Mode mode,
 
 StepStatus BP5Writer::BeginStep(StepMode mode, const float timeoutSeconds)
 {
-    m_WriterStep++;
+    if (m_BetweenStepPairs)
+    {
+        throw std::logic_error("ERROR: BeginStep() is called a second time "
+                               "without an intervening EndStep()");
+    }
+
+    m_BetweenStepPairs = true;
     if (m_Parameters.BufferVType == (int)BufferVType::MallocVType)
     {
         m_BP5Serializer.InitStep(new MallocV("BP5Writer", false,
@@ -90,9 +96,9 @@ void BP5Writer::WriteMetaMetadata(
     }
 }
 
-uint64_t BP5Writer::WriteMetadata(
-    const std::vector<format::BufferV::iovec> MetaDataBlocks,
-    const std::vector<format::BufferV::iovec> AttributeBlocks)
+uint64_t
+BP5Writer::WriteMetadata(const std::vector<core::iovec> &MetaDataBlocks,
+                         const std::vector<core::iovec> &AttributeBlocks)
 {
     uint64_t MDataTotalSize = 0;
     uint64_t MetaDataSize = 0;
@@ -165,7 +171,7 @@ void BP5Writer::WriteData_EveryoneWrites(format::BufferV *Data,
     const aggregator::MPIChain *a =
         dynamic_cast<aggregator::MPIChain *>(m_Aggregator);
 
-    format::BufferV::BufferV_iovec DataVec = Data->DataVec();
+    std::vector<core::iovec> DataVec = Data->DataVec();
 
     // new step writing starts at offset m_DataPos on aggregator
     // others will wait for the position to arrive from the rank below
@@ -184,34 +190,14 @@ void BP5Writer::WriteData_EveryoneWrites(format::BufferV *Data,
     if (!SerializedWriters && a->m_Comm.Rank() < a->m_Comm.Size() - 1)
     {
         /* Send the token before writing so everyone can start writing asap */
-        int i = 0;
-        uint64_t nextWriterPos = m_DataPos;
-        while (DataVec[i].iov_base != NULL)
-        {
-            nextWriterPos += DataVec[i].iov_len;
-            i++;
-        }
+        uint64_t nextWriterPos = m_DataPos + Data->Size();
         a->m_Comm.Isend(&nextWriterPos, 1, a->m_Comm.Rank() + 1, 0,
                         "Chain token in BP5Writer::WriteData");
     }
 
-    int i = 0;
-    while (DataVec[i].iov_base != NULL)
-    {
-        if (i == 0)
-        {
-
-            m_FileDataManager.WriteFileAt((char *)DataVec[i].iov_base,
-                                          DataVec[i].iov_len, m_StartDataPos);
-        }
-        else
-        {
-            m_FileDataManager.WriteFiles((char *)DataVec[i].iov_base,
-                                         DataVec[i].iov_len);
-        }
-        m_DataPos += DataVec[i].iov_len;
-        i++;
-    }
+    m_FileDataManager.WriteFileAt(DataVec.data(), DataVec.size(),
+                                  m_StartDataPos);
+    m_DataPos += Data->Size();
 
     if (SerializedWriters && a->m_Comm.Rank() < a->m_Comm.Size() - 1)
     {
@@ -236,8 +222,6 @@ void BP5Writer::WriteData_EveryoneWrites(format::BufferV *Data,
                            "Chain token in BP5Writer::WriteData");
         }
     }
-
-    delete[] DataVec;
 }
 
 void BP5Writer::WriteMetadataFileIndex(uint64_t MetaDataPos,
@@ -309,7 +293,14 @@ void BP5Writer::MarshalAttributes()
     for (const auto &attributePair : attributes)
     {
         const std::string name(attributePair.first);
-        const DataType type(attributePair.second->m_Type);
+        auto baseAttr = &attributePair.second;
+        const DataType type((*baseAttr)->m_Type);
+        int element_count = -1;
+
+        if (!attributePair.second->m_IsSingleValue)
+        {
+            element_count = (*baseAttr)->m_Elements;
+        }
 
         if (type == DataType::None)
         {
@@ -318,11 +309,22 @@ void BP5Writer::MarshalAttributes()
         {
             core::Attribute<std::string> &attribute =
                 *m_IO.InquireAttribute<std::string>(name);
-            int element_count = -1;
-            const char *data_addr = attribute.m_DataSingleValue.c_str();
-            if (!attribute.m_IsSingleValue)
+            void *data_addr;
+            if (attribute.m_IsSingleValue)
             {
-                //
+                data_addr = (void *)attribute.m_DataSingleValue.c_str();
+            }
+            else
+            {
+                const char **tmp =
+                    (const char **)malloc(sizeof(char *) * element_count);
+                for (int i = 0; i < element_count; i++)
+                {
+                    auto str = &attribute.m_DataArray[i];
+                    tmp[i] = str->c_str();
+                }
+                // tmp will be free'd after final attribute marshalling
+                data_addr = (void *)tmp;
             }
 
             m_BP5Serializer.MarshalAttribute(name.c_str(), type, sizeof(char *),
@@ -343,7 +345,7 @@ void BP5Writer::MarshalAttributes()
                                          sizeof(T), element_count, data_addr); \
     }
 
-        ADIOS2_FOREACH_ATTRIBUTE_PRIMITIVE_STDTYPE_1ARG(declare_type)
+        ADIOS2_FOREACH_PRIMITIVE_STDTYPE_1ARG(declare_type)
 #undef declare_type
     }
     m_MarshaledAttributesCount = attributesCount;
@@ -351,6 +353,7 @@ void BP5Writer::MarshalAttributes()
 
 void BP5Writer::EndStep()
 {
+    m_BetweenStepPairs = false;
     PERFSTUBS_SCOPED_TIMER("BP5Writer::EndStep");
     m_Profiler.Start("endstep");
     MarshalAttributes();
@@ -393,7 +396,7 @@ void BP5Writer::EndStep()
     {
         std::vector<format::BP5Base::MetaMetaInfoBlock> UniqueMetaMetaBlocks;
         std::vector<uint64_t> DataSizes;
-        std::vector<BufferV::iovec> AttributeBlocks;
+        std::vector<core::iovec> AttributeBlocks;
         auto Metadata = m_BP5Serializer.BreakoutContiguousMetadata(
             RecvBuffer, RecvCounts, UniqueMetaMetaBlocks, AttributeBlocks,
             DataSizes, m_WriterDataPos);
@@ -420,6 +423,7 @@ void BP5Writer::EndStep()
     }
     delete RecvBuffer;
     m_Profiler.Stop("endstep");
+    m_WriterStep++;
 }
 
 // PRIVATE
@@ -850,6 +854,11 @@ void BP5Writer::InitBPBuffer()
     }
 }
 
+void BP5Writer::NotifyEngineAttribute(std::string name, DataType type) noexcept
+{
+    m_MarshaledAttributesCount = 0;
+}
+
 void BP5Writer::FlushData(const bool isFinal)
 {
     BufferV *DataBuf;
@@ -897,6 +906,15 @@ void BP5Writer::DoClose(const int transportIndex)
 {
     PERFSTUBS_SCOPED_TIMER("BP5Writer::Close");
 
+    if ((m_WriterStep == 0) && !m_BetweenStepPairs)
+    {
+        /* never did begin step, do one now */
+        BeginStep(StepMode::Update);
+    }
+    if (m_BetweenStepPairs)
+    {
+        EndStep();
+    }
     m_FileDataManager.CloseFiles(transportIndex);
     // Delete files from temporary storage if draining was on
 

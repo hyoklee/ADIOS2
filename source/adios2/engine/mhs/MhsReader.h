@@ -11,11 +11,7 @@
 #ifndef ADIOS2_ENGINE_MHSREADER_H_
 #define ADIOS2_ENGINE_MHSREADER_H_
 
-#include "adios2/common/ADIOSConfig.h"
-#include "adios2/core/ADIOS.h"
 #include "adios2/core/Engine.h"
-#include "adios2/helper/adiosComm.h"
-#include "adios2/helper/adiosFunctions.h"
 #include "adios2/operator/compress/CompressSirius.h"
 
 namespace adios2
@@ -41,7 +37,7 @@ public:
 private:
     std::vector<IO *> m_SubIOs;
     std::vector<Engine *> m_SubEngines;
-    std::shared_ptr<compress::CompressSirius> m_Compressor;
+    std::shared_ptr<compress::CompressSirius> m_SiriusCompressor;
     int m_Tiers;
 
 #define declare_type(T)                                                        \

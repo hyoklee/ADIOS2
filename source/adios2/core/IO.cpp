@@ -55,12 +55,10 @@ namespace adios2
 namespace core
 {
 
-IO::EngineFactoryEntry IO_MakeEngine_HDFMixer();
 IO::EngineFactoryEntry IO_MakeEngine_HDF5();
 
 namespace
 {
-
 std::unordered_map<std::string, IO::EngineFactoryEntry> Factory = {
     {"bp3",
      {IO::MakeEngine<engine::BP3Reader>, IO::MakeEngine<engine::BP3Writer>}},
@@ -72,14 +70,6 @@ std::unordered_map<std::string, IO::EngineFactoryEntry> Factory = {
 #else
      IO::NoEngineEntry("ERROR: this version didn't compile with "
                        "BP5 library, can't use BP5 engine\n")
-#endif
-    },
-    {"hdfmixer",
-#ifdef ADIOS2_HAVE_HDF5
-     IO_MakeEngine_HDFMixer()
-#else
-     IO::NoEngineEntry("ERROR: this version didn't compile with "
-                       "HDF5 library, can't use HDF5 engine\n")
 #endif
     },
     {"dataman",
@@ -500,12 +490,15 @@ DataType IO::InquireAttributeType(const std::string &name,
     return itAttribute->second->m_Type;
 }
 
-size_t IO::AddOperation(Operator &op, const Params &parameters) noexcept
+void IO::AddOperation(const std::string &variable,
+                      const std::string &operatorType,
+                      const Params &parameters) noexcept
 {
     PERFSTUBS_SCOPED_TIMER("IO::other");
-    m_Operations.push_back(
-        Operation{&op, helper::LowerCaseParams(parameters), Params()});
-    return m_Operations.size() - 1;
+    auto params = helper::LowerCaseParams(parameters);
+    Operator *op = &m_ADIOS.DefineOperator(
+        m_Name + "_" + variable + "_" + operatorType, operatorType, params);
+    m_VarOpsPlaceholder[variable].emplace_back(Operation{op, params, Params()});
 }
 
 Engine &IO::Open(const std::string &name, const Mode mode, helper::Comm comm)
@@ -514,6 +507,8 @@ Engine &IO::Open(const std::string &name, const Mode mode, helper::Comm comm)
     auto itEngineFound = m_Engines.find(name);
     const bool isEngineFound = (itEngineFound != m_Engines.end());
     bool isEngineActive = false;
+    Mode mode_to_use = mode;
+
     if (isEngineFound)
     {
         if (*itEngineFound->second)
@@ -560,7 +555,8 @@ Engine &IO::Open(const std::string &name, const Mode mode, helper::Comm comm)
         {
             engineTypeLC = "hdf5";
         }
-        else if (mode == Mode::Read)
+        else if ((mode_to_use == Mode::Read) ||
+                 (mode_to_use == Mode::ReadRandomAccess))
         {
             if (adios2sys::SystemTools::FileIsDirectory(name))
             {
@@ -573,6 +569,10 @@ Engine &IO::Open(const std::string &name, const Mode mode, helper::Comm comm)
                 }
                 engineTypeLC = "bp";
                 engineTypeLC.push_back(v);
+            }
+            else if (adios2sys::SystemTools::FileIsDirectory(name + ".tier0"))
+            {
+                engineTypeLC = "mhs";
             }
             else
             {
@@ -621,18 +621,23 @@ Engine &IO::Open(const std::string &name, const Mode mode, helper::Comm comm)
         //          << std::endl;
     }
 
+    if ((engineTypeLC != "bp5") && (mode_to_use == Mode::ReadRandomAccess))
+    {
+        // only BP5 special-cases file-reader random access mode
+        mode_to_use = Mode::Read;
+    }
     // For the inline engine, there must be exactly 1 reader, and exactly 1
     // writer.
     if (engineTypeLC == "inline")
     {
-        if (mode == Mode::Append)
+        if (mode_to_use == Mode::Append)
         {
             throw std::runtime_error(
                 "Append mode is not supported for the inline engine.");
         }
 
         // See inline.rst:44
-        if (mode == Mode::Sync)
+        if (mode_to_use == Mode::Sync)
         {
             throw std::runtime_error(
                 "Sync mode is not supported for the inline engine.");
@@ -653,7 +658,7 @@ Engine &IO::Open(const std::string &name, const Mode mode, helper::Comm comm)
         if (m_Engines.size() == 1)
         {
             auto engine_ptr = m_Engines.begin()->second;
-            if (engine_ptr->OpenMode() == mode)
+            if (engine_ptr->OpenMode() == mode_to_use)
             {
                 std::string msg =
                     "The previously added engine " + engine_ptr->m_Name +
@@ -669,13 +674,16 @@ Engine &IO::Open(const std::string &name, const Mode mode, helper::Comm comm)
     auto f = FactoryLookup(engineTypeLC);
     if (f != Factory.end())
     {
-        if (mode == Mode::Read)
+        if ((mode_to_use == Mode::Read) ||
+            (mode_to_use == Mode::ReadRandomAccess))
         {
-            engine = f->second.MakeReader(*this, name, mode, std::move(comm));
+            engine =
+                f->second.MakeReader(*this, name, mode_to_use, std::move(comm));
         }
         else
         {
-            engine = f->second.MakeWriter(*this, name, mode, std::move(comm));
+            engine =
+                f->second.MakeWriter(*this, name, mode_to_use, std::move(comm));
         }
     }
     else
@@ -842,10 +850,10 @@ ADIOS2_FOREACH_STDTYPE_1ARG(define_template_instantiation)
 #define declare_template_instantiation(T)                                      \
     template Attribute<T> &IO::DefineAttribute<T>(                             \
         const std::string &, const T *, const size_t, const std::string &,     \
-        const std::string);                                                    \
+        const std::string, const bool);                                        \
     template Attribute<T> &IO::DefineAttribute<T>(                             \
         const std::string &, const T &, const std::string &,                   \
-        const std::string);                                                    \
+        const std::string, const bool);                                        \
     template Attribute<T> *IO::InquireAttribute<T>(                            \
         const std::string &, const std::string &, const std::string) noexcept;
 

@@ -11,6 +11,7 @@
 #include "TransportMan.h"
 
 #include <ios>
+#include <iostream>
 #include <set>
 
 #include "adios2/helper/adiosFunctions.h" //CreateDirectory
@@ -60,7 +61,28 @@ void TransportMan::MkDirsBarrier(const std::vector<std::string> &fileNames,
             {
                 const std::string path(
                     fileNames[i].substr(0, lastPathSeparator));
-                helper::CreateDirectory(path);
+
+                std::string library;
+                helper::SetParameterValue("Library", parameters, library);
+                helper::SetParameterValue("library", parameters, library);
+                if (library == "Daos" || library == "daos")
+                {
+#ifdef ADIOS2_HAVE_DAOS
+                    auto transport =
+                        std::make_shared<transport::FileDaos>(m_Comm);
+                    transport->SetParameters({{"SingleProcess", "true"}});
+                    // int rank = m_Comm.Rank();
+                    // std::cout << "rank " << rank << ": start
+                    // transport->MkDir(" << path << ")..." << std::endl;
+                    transport->MkDir(path);
+                    // std::cout << "rank " << rank << ": transport->MkDir(" <<
+                    // path << ") succeeded!" << std::endl;
+#endif
+                }
+                else
+                {
+                    helper::CreateDirectory(path);
+                }
             }
         }
     };
@@ -240,6 +262,53 @@ void TransportMan::WriteFileAt(const char *buffer, const size_t size,
         CheckFile(itTransport, ", in call to WriteFileAt with index " +
                                    std::to_string(transportIndex));
         itTransport->second->Write(buffer, size, start);
+    }
+}
+
+void TransportMan::WriteFiles(const core::iovec *iov, const size_t iovcnt,
+                              const int transportIndex)
+{
+    if (transportIndex == -1)
+    {
+        for (auto &transportPair : m_Transports)
+        {
+            auto &transport = transportPair.second;
+            if (transport->m_Type == "File")
+            {
+                // make this truly asynch?
+                transport->WriteV(iov, static_cast<int>(iovcnt));
+            }
+        }
+    }
+    else
+    {
+        auto itTransport = m_Transports.find(transportIndex);
+        CheckFile(itTransport, ", in call to WriteFiles with index " +
+                                   std::to_string(transportIndex));
+        itTransport->second->WriteV(iov, static_cast<int>(iovcnt));
+    }
+}
+
+void TransportMan::WriteFileAt(const core::iovec *iov, const size_t iovcnt,
+                               const size_t start, const int transportIndex)
+{
+    if (transportIndex == -1)
+    {
+        for (auto &transportPair : m_Transports)
+        {
+            auto &transport = transportPair.second;
+            if (transport->m_Type == "File")
+            {
+                transport->WriteV(iov, static_cast<int>(iovcnt), start);
+            }
+        }
+    }
+    else
+    {
+        auto itTransport = m_Transports.find(transportIndex);
+        CheckFile(itTransport, ", in call to WriteFileAt with index " +
+                                   std::to_string(transportIndex));
+        itTransport->second->WriteV(iov, static_cast<int>(iovcnt), start);
     }
 }
 

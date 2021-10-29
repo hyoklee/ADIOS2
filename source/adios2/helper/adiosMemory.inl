@@ -74,6 +74,17 @@ void InsertToBuffer(std::vector<char> &buffer, const T *source,
     buffer.insert(buffer.end(), src, src + elements * sizeof(T));
 }
 
+#ifdef ADIOS2_HAVE_CUDA
+template <class T>
+void CopyFromGPUToBuffer(std::vector<char> &buffer, size_t &position,
+                         const T *source, const size_t elements) noexcept
+{
+    const char *src = reinterpret_cast<const char *>(source);
+    MemcpyGPUToBuffer(buffer.data() + position, src, elements * sizeof(T));
+    position += elements * sizeof(T);
+}
+#endif
+
 template <class T>
 void CopyToBuffer(std::vector<char> &buffer, size_t &position, const T *source,
                   const size_t elements) noexcept

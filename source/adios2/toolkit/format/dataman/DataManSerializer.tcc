@@ -26,6 +26,8 @@
 #include "adios2/operator/compress/CompressMGARD.h"
 #endif
 
+#include "adios2/operator/compress/CompressorFactory.h"
+
 #include "adios2/helper/adiosFunctions.h"
 
 #include <adios2-perfstubs-interface.h>
@@ -323,113 +325,13 @@ int DataManSerializer::GetData(T *outputData, const std::string &varName,
                 m_OperatorMap[varName] = j.params;
                 m_OperatorMap[varName]["method"] = j.compression;
                 m_OperatorMapMutex.unlock();
-            }
-            if (j.compression == "zfp")
-            {
-#ifdef ADIOS2_HAVE_ZFP
-                core::compress::CompressZFP decompressor(j.params);
-                size_t datasize =
-                    std::accumulate(j.count.begin(), j.count.end(), sizeof(T),
-                                    std::multiplies<size_t>());
-
-                decompressBuffer.reserve(datasize);
-                try
-                {
-                    decompressor.Decompress(j.buffer->data() + j.position,
-                                            j.size, decompressBuffer.data(),
-                                            j.count, j.type, j.params);
-                    decompressed = true;
-                }
-                catch (std::exception &e)
-                {
-                    std::cout << e.what() << std::endl;
-                    return -4; // decompression failed
-                }
-
+                decompressBuffer.reserve(
+                    helper::GetTotalSize(j.count, sizeof(T)));
+                core::compress::CompressorFactory decompressor;
+                decompressor.Decompress(j.buffer->data() + j.position, j.size,
+                                        decompressBuffer.data());
+                decompressed = true;
                 input_data = decompressBuffer.data();
-#else
-                throw std::runtime_error("ADIOS2 does not have ZFP");
-#endif
-            }
-            else if (j.compression == "sz")
-            {
-#ifdef ADIOS2_HAVE_SZ
-                core::compress::CompressSZ decompressor(j.params);
-                size_t datasize =
-                    std::accumulate(j.count.begin(), j.count.end(), sizeof(T),
-                                    std::multiplies<size_t>());
-
-                decompressBuffer.reserve(datasize);
-                try
-                {
-                    decompressor.Decompress(j.buffer->data() + j.position,
-                                            j.size, decompressBuffer.data(),
-                                            j.count, j.type, j.params);
-                    decompressed = true;
-                }
-                catch (std::exception &e)
-                {
-                    std::cout << e.what() << std::endl;
-                    return -4; // decompression failed
-                }
-                input_data = decompressBuffer.data();
-#else
-                throw std::runtime_error("ADIOS2 does not have SZ");
-#endif
-            }
-            else if (j.compression == "bzip2")
-            {
-#ifdef ADIOS2_HAVE_BZIP2
-                core::compress::CompressBZIP2 decompressor(j.params);
-                size_t datasize =
-                    std::accumulate(j.count.begin(), j.count.end(), sizeof(T),
-                                    std::multiplies<size_t>());
-
-                decompressBuffer.reserve(datasize);
-                try
-                {
-                    Params info;
-                    decompressor.Decompress(j.buffer->data() + j.position,
-                                            j.size, decompressBuffer.data(),
-                                            datasize, info);
-                    decompressed = true;
-                }
-                catch (std::exception &e)
-                {
-                    std::cout << e.what() << std::endl;
-                    return -4; // decompression failed
-                }
-                input_data = decompressBuffer.data();
-#else
-                throw std::runtime_error("ADIOS2 does not have Bzip2");
-#endif
-            }
-            else if (j.compression == "mgard")
-            {
-#ifdef ADIOS2_HAVE_MGARD
-                core::compress::CompressMGARD decompressor(j.params);
-                size_t datasize =
-                    std::accumulate(j.count.begin(), j.count.end(), sizeof(T),
-                                    std::multiplies<size_t>());
-
-                decompressBuffer.reserve(datasize);
-                try
-                {
-                    decompressor.Decompress(j.buffer->data() + j.position,
-                                            j.size, decompressBuffer.data(),
-                                            j.count, j.type, j.params);
-                    decompressed = true;
-                }
-                catch (std::exception &e)
-                {
-                    std::cout << e.what() << std::endl;
-                    return -4; // decompression failed
-                }
-
-                input_data = decompressBuffer.data();
-#else
-                throw std::runtime_error("ADIOS2 does not have MGARD");
-#endif
             }
 
             if (not decompressed)
@@ -482,10 +384,9 @@ void DataManSerializer::PutZfp(nlohmann::json &metaj, size_t &datasize,
                                              std::multiplies<size_t>()));
     try
     {
-        Params info;
-        datasize = compressor.Compress(inputData, varCount, sizeof(T),
-                                       helper::GetDataType<T>(),
-                                       m_CompressBuffer.data(), params, info);
+        datasize = compressor.Operate(reinterpret_cast<const char *>(inputData),
+                                      {}, varCount, helper::GetDataType<T>(),
+                                      m_CompressBuffer.data(), params);
     }
     catch (std::exception &e)
     {
@@ -510,10 +411,9 @@ void DataManSerializer::PutSz(nlohmann::json &metaj, size_t &datasize,
     core::compress::CompressSZ compressor(params);
     try
     {
-        Params info;
-        datasize = compressor.Compress(inputData, varCount, sizeof(T),
-                                       helper::GetDataType<T>(),
-                                       m_CompressBuffer.data(), params, info);
+        datasize = compressor.Operate(reinterpret_cast<const char *>(inputData),
+                                      {}, varCount, helper::GetDataType<T>(),
+                                      m_CompressBuffer.data(), params);
     }
     catch (std::exception &e)
     {
@@ -538,10 +438,9 @@ void DataManSerializer::PutBZip2(nlohmann::json &metaj, size_t &datasize,
     core::compress::CompressBZIP2 compressor(params);
     try
     {
-        Params info;
-        datasize = compressor.Compress(inputData, varCount, sizeof(T),
-                                       helper::GetDataType<T>(),
-                                       m_CompressBuffer.data(), params, info);
+        datasize = compressor.Operate(reinterpret_cast<const char *>(inputData),
+                                      {}, varCount, helper::GetDataType<T>(),
+                                      m_CompressBuffer.data(), params);
     }
     catch (std::exception &e)
     {
@@ -566,10 +465,9 @@ void DataManSerializer::PutMgard(nlohmann::json &metaj, size_t &datasize,
                                              std::multiplies<size_t>()));
     try
     {
-        Params info;
-        datasize = compressor.Compress(inputData, varCount, sizeof(T),
-                                       helper::GetDataType<T>(),
-                                       m_CompressBuffer.data(), params, info);
+        datasize = compressor.Operate(reinterpret_cast<const char *>(inputData),
+                                      {}, varCount, helper::GetDataType<T>(),
+                                      m_CompressBuffer.data(), params);
     }
     catch (std::exception &e)
     {

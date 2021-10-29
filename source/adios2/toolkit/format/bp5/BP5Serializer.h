@@ -10,6 +10,7 @@
 
 #include "BP5Base.h"
 #include "adios2/core/Attribute.h"
+#include "adios2/core/CoreTypes.h"
 #include "adios2/core/IO.h"
 #include "adios2/toolkit/format/buffer/BufferV.h"
 #include "adios2/toolkit/format/buffer/heap/BufferSTL.h"
@@ -93,10 +94,10 @@ public:
         const format::Buffer *AttributeEncodeBuffer, uint64_t DataSize,
         uint64_t WriterDataPos) const;
 
-    std::vector<BufferV::iovec> BreakoutContiguousMetadata(
+    std::vector<core::iovec> BreakoutContiguousMetadata(
         std::vector<char> *Aggregate, const std::vector<size_t> Counts,
         std::vector<MetaMetaInfoBlock> &UniqueMetaMetaBlocks,
-        std::vector<BufferV::iovec> &AttributeBlocks,
+        std::vector<core::iovec> &AttributeBlocks,
         std::vector<uint64_t> &DataSizes,
         std::vector<uint64_t> &WriterDataPositions) const;
 
@@ -109,6 +110,7 @@ private:
     {
         void *Key;
         int FieldID;
+        ShapeID Shape;
         size_t DataOffset;
         size_t MetaOffset;
         int DimCount;
@@ -123,9 +125,6 @@ private:
         int MetaFieldCount = 0;
         FMFieldList MetaFields = NULL;
         FMFormat MetaFormat;
-        int DataFieldCount = 0;
-        FMFieldList DataFields = NULL;
-        FMFormat DataFormat = NULL;
         int AttributeFieldCount = 0;
         FMFieldList AttributeFields = NULL;
         FMFormat AttributeFormat = NULL;
@@ -168,7 +167,9 @@ private:
     void AddVarArrayField(FMFieldList *FieldP, int *CountP, const char *Name,
                           const DataType Type, int ElementSize,
                           char *SizeField);
-    char *ConcatName(const char *base_name, const char *postfix);
+    char *ConcatName(const char *base_name, const char *postfix,
+                     ShapeID Shape = ShapeID::Unknown);
+    const char *NamePrefix(ShapeID Shape);
     char *BuildVarName(const char *base_name, const int type,
                        const int element_size);
     void BreakdownVarName(const char *Name, char **base_name_p, int *type_p,
